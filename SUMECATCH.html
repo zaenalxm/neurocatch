@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>NEURO CATCHER – Coco Save The World</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: radial-gradient(circle at top, #1b2a4a, #05080f 70%);
+    font-family: Arial, sans-serif;
+    color: #fff;
+    overflow: hidden;
+    touch-action: none;
+    user-select: none;
+  }
+
+  #frontScreen {
+    position: fixed; inset: 0;
+    background: #000 url('front-bg-sprite.png') center / cover no-repeat;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 50;
+    text-align: center;
+  }
+
+  #frontScreen h1 { font-size: 42px; margin-bottom: 10px; }
+  #frontScreen h2 { font-size: 18px; opacity: .85; margin-bottom: 30px; }
+  #frontScreen button {
+    padding: 14px 34px; font-size: 20px; border: none; border-radius: 16px;
+    background: linear-gradient(90deg,#00f0ff,#7cffc8); cursor: pointer;
+  }
+
+  #game {
+    width:100vw; height:100vh;
+    position:relative;
+    display:none;
+    background: #000 url('ingame-bg-sprite.png') center / cover no-repeat;
+    overflow:hidden;
+  }
+
+  #player { width:72px; height:72px; position:absolute; bottom:20px; left:0; pointer-events:none; }
+  .core,.bomb,.heart { position:absolute; top:0; }
+  .core { width:50px; height:50px; }
+  .bomb,.heart { width:35px; height:35px; }
+  img { width:100%; height:100%; image-rendering:pixelated; }
+
+  #ui {
+    position:absolute; top:16px; left:16px; font-size:15px;
+    background:rgba(5,10,20,.6); padding:10px 14px; border-radius:12px;
+  }
+
+  #gameOver {
+    display:none; position:absolute; inset:0;
+    background:rgba(0,0,0,.85);
+    align-items:center; justify-content:center;
+    flex-direction:column; text-align:center;
+  }
+</style>
+</head>
+<body>
+
+<div id="frontScreen">
+  <h1>NEURO CATCHER</h1>
+  <h2>Coco Save The World</h2>
+  <button onclick="startGame()">START MISSION</button>
+</div>
+
+<img id="heroSprite" src="coco-catch.png" style="position:absolute; bottom:20px; left:0; width:72px; height:72px; pointer-events:none; display:none; z-index:10;" />
+
+<div id="game">
+  <div id="player"></div>
+  <div id="ui">
+    Score: <span id="score">0</span> |
+    Level: <span id="level">1</span> |
+    Lives: <span id="lives">3</span><br/>
+    High Score: <span id="highScore">0</span>
+  </div>
+
+  <div id="gameOver">
+    <h1>MISSION FAILED</h1>
+    <p id="finalScore">Score: 0</p>
+    <p id="finalHighScore">High Score: 0</p>
+    <button onclick="restartGame()">RETRY</button>
+  </div>
+</div>
+
+<audio id="bgGame" src="bg-game.mp3" loop></audio>
+<audio id="sfxCore" src="sfx-core.wav"></audio>
+<audio id="sfxBomb" src="sfx-bomb.wav"></audio>
+<audio id="sfxHeart" src="sfx-heart.wav"></audio>
+<audio id="sfxGameOver" src="sfx-gameover.wav"></audio>
+
+<script>
+const frontScreen = document.getElementById('frontScreen');
+const game = document.getElementById('game');
+const player = document.getElementById('player');
+const heroSprite = document.getElementById('heroSprite');
+const scoreEl = document.getElementById('score');
+const levelEl = document.getElementById('level');
+const livesEl = document.getElementById('lives');
+const highScoreEl = document.getElementById('highScore');
+const gameOverScreen = document.getElementById('gameOver');
+const finalScoreEl = document.getElementById('finalScore');
+const finalHighScoreEl = document.getElementById('finalHighScore');
+
+let score = 0, level = 1, lives = 3;
+let highScore = Number(localStorage.getItem('neuroHighScore')) || 0;
+let fallSpeed = 4, spawnInterval = 800;
+let spawnTimer, items = [];
+let gameRunning = false;
+
+const bgGame = document.getElementById('bgGame');
+const sfxCore = document.getElementById('sfxCore');
+const sfxBomb = document.getElementById('sfxBomb');
+const sfxHeart = document.getElementById('sfxHeart');
+const sfxGameOver = document.getElementById('sfxGameOver');
+
+function playSFX(a){ a.currentTime=0; a.play().catch(()=>{}); }
+
+// audio unlock (in‑game only)
+function unlockAudio(){
+  bgGame.play().then(()=>bgGame.pause()).catch(()=>{});
+  window.removeEventListener('pointerdown', unlockAudio);
+}
+window.addEventListener('pointerdown', unlockAudio);
+
+function startGame(){
+  frontScreen.style.display='none';
+  game.style.display='block';
+  heroSprite.style.display='block'; game.appendChild(heroSprite);
+  gameRunning=true;
+  highScoreEl.textContent=highScore;
+  bgGame.currentTime=0; bgGame.play().catch(()=>{});
+  resetSpawner(); requestAnimationFrame(update);
+}
+
+function spawnItem(){
+  const r=Math.random();
+  const type=r<0.1?'heart':r<0.35?'bomb':'core';
+  const el=document.createElement('div');
+  const img=document.createElement('img');
+  img.src= type==='core'?`core${Math.floor(Math.random()*5)+1}.png`: type==='bomb'?'bomb.png':'heart.png';
+  el.className=type; el.appendChild(img);
+  el.style.left=Math.random()*(innerWidth-40)+'px';
+  game.appendChild(el); items.push({el,y:0,type});
+}
+
+function update(){
+  if(!gameRunning) return;
+  for(let i=items.length-1;i>=0;i--){
+    const it=items[i]; it.y+=fallSpeed; it.el.style.transform=`translateY(${it.y}px)`;
+    const r=it.el.getBoundingClientRect(); const p=player.getBoundingClientRect();
+    if(r.bottom>=p.top && r.left<p.right && r.right>p.left){
+      if(it.type==='bomb'){ lives--; playSFX(sfxBomb); }
+      else if(it.type==='heart'){ lives++; playSFX(sfxHeart); }
+      else { score++; playSFX(sfxCore); updateLevel(); }
+      scoreEl.textContent=score; livesEl.textContent=lives;
+      game.removeChild(it.el); items.splice(i,1);
+      if(lives<=0) endGame();
+    } else if(it.y>innerHeight){
+      game.removeChild(it.el); items.splice(i,1);
+      if(it.type==='core'){ lives--; livesEl.textContent=lives; if(lives<=0) endGame(); }
+    }
+  }
+  requestAnimationFrame(update);
+}
+
+function updateLevel(){
+  const nl=Math.floor(score/20)+1;
+  if(nl!==level){ level=nl; fallSpeed=3+level*0.5; spawnInterval=Math.max(300,800-level*90); levelEl.textContent=level; resetSpawner(); }
+}
+
+function resetSpawner(){ clearInterval(spawnTimer); spawnTimer=setInterval(()=>gameRunning&&spawnItem(),spawnInterval); }
+
+function endGame(){
+  gameRunning=false; clearInterval(spawnTimer); bgGame.pause();
+  playSFX(sfxGameOver);
+  if(score>highScore){ highScore=score; localStorage.setItem('neuroHighScore',String(highScore)); }
+  highScoreEl.textContent=highScore;
+  finalScoreEl.textContent=`Score: ${score}`;
+  finalHighScoreEl.textContent=`High Score: ${highScore}`;
+  gameOverScreen.style.display='flex';
+}
+
+function restartGame(){
+  items.forEach(i=>game.removeChild(i.el)); items=[];
+  score=0; level=1; lives=3; fallSpeed=4; spawnInterval=800;
+  scoreEl.textContent=score; levelEl.textContent=level; livesEl.textContent=lives;
+  gameOverScreen.style.display='none'; bgGame.currentTime=0; bgGame.play().catch(()=>{});
+  gameRunning=true; resetSpawner(); requestAnimationFrame(update);
+}
+
+function movePlayer(x){
+  const w=player.offsetWidth; let pos=x-w/2;
+  pos=Math.max(0,Math.min(innerWidth-w,pos));
+  player.style.transform=`translateX(${pos}px)`;
+  heroSprite.style.transform=`translateX(${pos}px)`;
+}
+
+window.addEventListener('pointermove',e=>movePlayer(e.clientX));
+window.addEventListener('pointerdown',e=>{ movePlayer(e.clientX); e.preventDefault(); },{passive:false});
+
+highScoreEl.textContent=highScore;
+
+// Tests
+console.assert(typeof startGame==='function','startGame exists');
+console.assert(typeof spawnItem==='function','spawnItem exists');
+console.assert(typeof movePlayer==='function','movePlayer exists');
+</script>
+</body>
+</html>
